@@ -20,10 +20,18 @@
 | `SetBox(min, max)` | 设置盒子的最小点与最大点，两者为 `Vector3d` |
 | `SetSphere(center, radius)` | 设置球心 `Vector3d` 与半径 |
 | `SetRequireAllPoints(true/false)` | 选择严格/宽松模式 |
+| `Preview()` | 只计算并返回将被提取的单元，不创建输出网格 |
+| `GetSelectedCellIds()` | 获取最近一次 `Preview()` 或 `Execute()` 的原始单元 ID |
 | `Execute()` | 执行；失败返回 `false` |
 | `GetOutput()` | 获取输出，再转为 `UnstructuredMesh` |
 
 `SetBox` 和 `SetSphere` 选择不同区域，最后一次调用决定本次使用的区域。
+
+## GUI 预览与持续调整
+
+在“算法处理 → 按区域提取单元”窗口中设置参数后，先点击“预览”。程序只计算符合条件的原始单元，并用当前模型的单元选择高亮显示它们，不创建新模型。Box 模式还会在场景中显示可拖拽的盒子；拖动盒子的面、边或控制点会同步更新 Box 参数并自动刷新预览。确认范围后点击“执行”生成子网格。
+
+执行不会关闭参数窗口。可以继续修改 Box/Sphere、严格模式和半径后再次预览、再次执行。关闭窗口时，会清除临时预览并恢复打开窗口前的单元选择状态。
 
 ## 使用示例
 
@@ -68,7 +76,7 @@ filter->SetRequireAllPoints(false);
 | BoxCases | 1 | 3 | 1 | 3 |
 | SphereCases | 2 | 4 | 1 | 3 |
 
-表中数字为预期输出单元数；预期点数为单元数的 4 倍。测试还验证远离模型的盒子返回空网格、非法盒子与零/负半径被拒绝，每个模型共 8 项检查。
+表中数字为预期输出单元数；预期点数为单元数的 4 倍。测试还验证预览 ID 与最终输出一致、同一 Filter 改参数后预览会更新、远离模型的盒子返回空网格、非法盒子与零/负半径被拒绝。测试在运行时为模型添加 float 点属性和 int 单元属性，并验证提取输出保留属性名称、类型、附着位置和数值。
 
 完整自动测试位于 `Examples/Filter/Selection/TestExtractCellsByRegion.cpp`。沿用已合并接口的 `testExtractCellsByRegion` 构建目标。在已配置好 iGameCore 和 Examples 的环境中，从仓库根目录执行（以 Windows、构建目录 `examples-build` 为例）：
 
@@ -88,4 +96,4 @@ Set-Location Examples
 - 相对路径相对于进程当前工作目录，不是源代码或可执行文件所在目录。推荐从 `Examples` 启动；也可从已经包含新 `Models` 文件的 Examples 构建目录启动。
 - 没有单元满足条件时，成功返回空网格属于正常结果。
 - 输出点号会重排，不能直接把输出点号当作原始点号使用。
-- 新模型专门验证区域选择和点集压缩，不带属性数组；本示例不覆盖属性复制正确性的全部情形。
+- 预览只改变临时单元高亮，不会创建或替换模型；关闭参数窗口时会恢复原有选择。
