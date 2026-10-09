@@ -19,6 +19,7 @@ public:
     void MouseReleaseEvent(IEvent event) override;
 
     void InitBox(const Point& p1, const Point& p2);
+    void SetAllowRotation(bool allow) { m_AllowRotation = allow; }
     void DeleteBox();
 
     void ToDraw();
@@ -87,6 +88,7 @@ protected:
 
     igm::vec2 m_PressSite = igm::vec2{0.0f};
     bool m_MeetedBox{};
+    bool m_AllowRotation{true};
     MouseButton m_MousePressButton{MouseButton::NoButton};
 
     std::vector<IGuint> m_DrawHandles;

@@ -238,6 +238,14 @@ function(igame_register_example_test EXAMPLE_TARGET)
         return()
     endif ()
 
+    if ("${EXAMPLE_TARGET}" STREQUAL "testExtractCellsByRegion")
+        add_test(NAME ${EXAMPLE_TARGET}
+            COMMAND "$<TARGET_FILE:${EXAMPLE_TARGET}>"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+        set_tests_properties(${EXAMPLE_TARGET} PROPERTIES TIMEOUT 30 LABELS "region-extraction")
+        return()
+    endif ()
+
     if ("${EXAMPLE_TARGET}" STREQUAL "testRandomVectors" AND
         NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Models/CellCenter_hexa_grid.vtk")
         return()
@@ -478,6 +486,7 @@ igame_add_example(testGetClosestPointsInLine Filter/Selection/TestGetClosestPoin
 igame_add_example(testGetClosestCellsInLine Filter/Selection/TestGetClosestCellsInLine.cpp)
 igame_add_example(testGetPointsInFrustum Filter/Selection/TestGetPointsInFrustum.cpp)
 igame_add_example(testGetCellsInFrustum Filter/Selection/TestGetCellsInFrustum.cpp)
+igame_add_example(testExtractCellsByRegion Filter/Selection/TestExtractCellsByRegion.cpp)
 
 # Compression
 igame_add_example(testDecoder Filter/Compression/TestDecoder.cpp)

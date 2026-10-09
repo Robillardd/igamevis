@@ -430,7 +430,7 @@ void BoxStyle::MiddleButtonPress(IEvent event) {
         }
     }
 
-    if (m_SelectedItem == IG_NONE) {
+    if (m_AllowRotation && m_SelectedItem == IG_NONE) {
         //Select Box Face
         auto meet = MeetBoxRotate(event, rayStart, rayDir);
         if (std::get<0>(meet)) {
@@ -495,7 +495,7 @@ void BoxStyle::ChangeBoxDrawMode(IEvent event) {
         if (std::get<0>(meet)) { m_BoxDrawMode = IG_EDGE; }
     }
 
-    if (m_BoxDrawMode == IG_NONE) {
+    if (m_AllowRotation && m_BoxDrawMode == IG_NONE) {
         //Select Box Face
         auto meet = MeetBoxRotate(event, rayStart, rayDir);
         if (std::get<0>(meet)) { m_BoxDrawMode = IG_CELL; }

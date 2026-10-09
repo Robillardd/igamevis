@@ -46,6 +46,14 @@ void RadialStyle::DrawRadial() {
     painter->SetPen(Color::Red);
     int endPointHandle = painter->DrawPoint(m_EndPoint);
     m_DrawHandles.push_back(endPointHandle);
+    if (m_ShowSphere) {
+        const float radius = (m_EndPoint - m_StartPoint).length();
+        painter->SetPen(2);
+        painter->SetPen(Color::Yellow);
+        m_DrawHandles.push_back(painter->DrawCircle(m_StartPoint, Vector3f(1, 0, 0), radius, 64));
+        m_DrawHandles.push_back(painter->DrawCircle(m_StartPoint, Vector3f(0, 1, 0), radius, 64));
+        m_DrawHandles.push_back(painter->DrawCircle(m_StartPoint, Vector3f(0, 0, 1), radius, 64));
+    }
 }
 
 void RadialStyle::ClearDrawRadial() {
@@ -119,8 +127,13 @@ void RadialStyle::MouseMoveEvent(IEvent event) {
     igm::vec4 newPoint_WorldCoord = m_InvertedMVP * Point_NDC;
     newPoint_WorldCoord /= newPoint_WorldCoord.w;
 
-    *m_SelectedPoint = Point(newPoint_WorldCoord.x, newPoint_WorldCoord.y,
-                             newPoint_WorldCoord.z);
+    const Point newPoint(newPoint_WorldCoord.x, newPoint_WorldCoord.y,
+                         newPoint_WorldCoord.z);
+    if (m_MoveEndWithStart && m_SelectedPoint == &m_StartPoint)
+        m_EndPoint = m_EndPoint + (newPoint - m_StartPoint);
+    *m_SelectedPoint = newPoint;
+    ClearDrawRadial();
+    DrawRadial();
     CallBack();
 }
 
@@ -135,9 +148,11 @@ void RadialStyle::SetShow(bool show) {
 bool RadialStyle::GetShow() const { return m_Show; }
 
 void RadialStyle::SetPoint(const Point& startPoint, const Point& endPoint) {
+    if (m_Show) ClearDrawRadial();
     m_StartPoint = startPoint;
     m_EndPoint = endPoint;
     m_MaxDis = (m_StartPoint - m_EndPoint).length() * 0.02;
+    if (m_Show) DrawRadial();
 }
 
 const Point& RadialStyle::GetStartPoint() { return m_StartPoint; }
@@ -145,7 +160,11 @@ const Point& RadialStyle::GetStartPoint() { return m_StartPoint; }
 const Point& RadialStyle::GetEndPoint() { return m_EndPoint; }
 
 void RadialStyle::_SetPointMoveCallBack(const std::string& name,
-                                        std::function<void()> callBack) {
+                                       std::function<void()> callBack) {
     m_PointMoveCallBacks[name] = callBack;
+}
+
+void RadialStyle::RemovePointMoveCallBack(const std::string& name) {
+    m_PointMoveCallBacks.erase(name);
 }
 IGAME_NAMESPACE_END

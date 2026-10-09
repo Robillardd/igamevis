@@ -16,12 +16,15 @@ public:
     void SetShow(bool show);
     bool GetShow() const;
     void SetPoint(const Point& startPoint, const Point& endPoint);
+    void SetMoveEndWithStart(bool enabled) { m_MoveEndWithStart = enabled; }
+    void SetShowSphere(bool enabled) { m_ShowSphere = enabled; }
     const Point& GetStartPoint();
     const Point& GetEndPoint();
     void DrawRadial();
     void ClearDrawRadial();
     void _SetPointMoveCallBack(const std::string& name,
                                std::function<void()> callBack);
+    void RemovePointMoveCallBack(const std::string& name);
 #define SetPointMoveCallBack(callBack)                                         \
     _SetPointMoveCallBack(std::string(__FILE__) + std::to_string(__LINE__),    \
                           callBack)
@@ -35,6 +38,8 @@ protected:
     ~RadialStyle() = default;
 
     bool m_Show{};
+    bool m_MoveEndWithStart{};
+    bool m_ShowSphere{};
 
     float m_MaxDis{};
 

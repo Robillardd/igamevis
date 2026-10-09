@@ -63,6 +63,9 @@
 #include "Convert/iGameConvertToSurfaceMeshFilter.h"
 #include "Convert/iGameConvertToVolumeMeshFilter.h"
 #include "Interactor/iGameInteractor.h"
+#include "Interactor/iGameBoxStyle.h"
+#include "Interactor/iGameRadialStyle.h"
+#include "iGameSelectionParameter.h"
 
 #include "CellCenter/iGameCellCenterFilter.h"
 #include "MyFilter/iGameCleanToGridFilter.h"
@@ -104,6 +107,7 @@
 #include <QSaveFile>
 #include <limits>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QDebug>
 #include <QLabel>
 #include <QMessageBox>
@@ -119,6 +123,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegion>
+#include <memory>
 #include <QScrollArea>
 #include <Sources/iGameLineTypePointsSourceFilter.h>
 #include <Tests/iGameVolumeMeshFilterTest.h>
@@ -3924,8 +3929,31 @@ void igQtMainWindow::initAllFilters() {
         const QString title = QStringLiteral("按区域提取单元");
         auto input = currentFilterInput(title);
         if (!input) return;
+        auto mesh = DynamicCast<UnstructuredMesh>(input);
+        if (!mesh) {
+            showDarkFramelessMessage(title, QStringLiteral("请选择非结构化网格。"));
+            return;
+        }
+        auto scene = rendererWidget->GetScene();
+        auto interactor = scene ? scene->GetInteractor() : nullptr;
+        if (!interactor) return;
+        auto selection = mesh->GetSelection();
+        std::vector<igIndex> selectionBefore;
+        std::vector<igIndex> pointsBefore;
+        if (selection) {
+            selectionBefore.assign(selection->GetSelectedCells().begin(), selection->GetSelectedCells().end());
+            pointsBefore.assign(selection->GetSelectedPoints().begin(), selection->GetSelectedPoints().end());
+        }
+        auto previousBox = interactor->GetSpecialInteractor("SelectBox");
+        const bool previousHaveBox = iGame::SelectionParameter::Instance().GetHaveBox();
+        const bool previousInSelection = iGame::SelectionParameter::Instance().GetInSelection();
+        if (auto oldBox = DynamicCast<iGame::BoxStyle>(previousBox)) oldBox->ClearDraw();
+
         auto* dialog = new igQtFilterDialogDockWidget(this, true);
         dialog->setFilterTitle(title);
+        dialog->setFilterDescription(QStringLiteral(
+                "拖动场景中的区域控件并预览高亮单元；执行后可继续调整，同一结果会更新。"));
+        dialog->enablePreview(true);
         const int shape = dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX,
                 QStringLiteral("区域"), std::vector<QString>{QStringLiteral("Box"), QStringLiteral("Sphere")});
         const int x0 = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("最小X / 中心X"), "0");
@@ -3937,8 +3965,94 @@ void igQtMainWindow::initAllFilters() {
         const int radius = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("球半径"), "1");
         const int strict = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
                 QStringLiteral("所有顶点都在区域内"), "true");
-        dialog->show();
-        dialog->setApplyFunctor([=, this]() {
+        auto* countLabel = new QLabel(QStringLiteral("尚未预览"), dialog);
+        dialog->addRowWidget(countLabel);
+
+        struct RegionSession {
+            iGame::BoxStyle::Pointer box;
+            iGame::RadialStyle::Pointer sphere;
+            DataObject::Pointer output;
+            bool previewPending = false;
+            bool closed = false;
+        };
+        auto session = std::make_shared<RegionSession>();
+        session->box = iGame::BoxStyle::New();
+        session->box->Initialize(interactor);
+        session->box->SetAllowRotation(false);
+        session->sphere = iGame::RadialStyle::New();
+        session->sphere->Initialize(interactor);
+        session->sphere->SetMoveEndWithStart(true);
+        session->sphere->SetShowSphere(true);
+        QPointer<igQtFilterDialogDockWidget> safeDialog(dialog);
+
+        auto line = [dialog](int id) { return qobject_cast<QLineEdit*>(dialog->getWidget(id)); };
+        auto queuePreview = [safeDialog, session]() {
+            if (session->previewPending || session->closed || !safeDialog) return;
+            session->previewPending = true;
+            QTimer::singleShot(0, safeDialog, [safeDialog, session]() {
+                session->previewPending = false;
+                if (!session->closed && safeDialog) safeDialog->preview();
+            });
+        };
+        auto updateWidget = [=]() {
+            if (session->closed) return;
+            bool ok[9]{};
+            const int mode = dialog->getComboIndex(shape, ok[0]);
+            const double a = dialog->getDouble(x0, ok[1]), b = dialog->getDouble(y0, ok[2]),
+                         c = dialog->getDouble(z0, ok[3]), d = dialog->getDouble(x1, ok[4]),
+                         e = dialog->getDouble(y1, ok[5]), f = dialog->getDouble(z1, ok[6]),
+                         r = dialog->getDouble(radius, ok[7]);
+            if (!ok[0] || !ok[1] || !ok[2] || !ok[3]) return;
+            if (mode == 0 && ok[4] && ok[5] && ok[6] && d >= a && e >= b && f >= c) {
+                session->box->InitBox(iGame::Point(a, b, c), iGame::Point(d, e, f));
+            } else if (mode == 1 && ok[7] && r > 0) {
+                session->sphere->SetPoint(iGame::Point(a, b, c), iGame::Point(a + r, b, c));
+            }
+            rendererWidget->update();
+        };
+        auto switchShape = [=]() {
+            if (!safeDialog || session->closed) return;
+            bool ok = false;
+            const int mode = dialog->getComboIndex(shape, ok);
+            if (!ok) return;
+            if (mode == 0) {
+                session->sphere->SetShow(false);
+                interactor->RemoveSepcialInteractor("ExtractCellsByRegionSphere");
+                interactor->_SetSpecialInteractor("SelectBox", session->box);
+                iGame::SelectionParameter::Instance().SetHaveBox(true);
+            } else {
+                session->box->ClearDraw();
+                interactor->RemoveSepcialInteractor("SelectBox");
+                iGame::SelectionParameter::Instance().SetHaveBox(false);
+                interactor->_SetSpecialInteractor("ExtractCellsByRegionSphere", session->sphere);
+            }
+            updateWidget();
+            if (mode == 1) session->sphere->SetShow(true);
+            queuePreview();
+        };
+        session->box->_SetPointMoveCallBack("ExtractCellsByRegion", [=]() {
+            if (!safeDialog || session->closed || !session->box->GetBox()) return;
+            const auto corners = session->box->GetBox()->GetExtremePoint();
+            auto setPoint = [=](const iGame::Point& p, int ix, int iy, int iz) {
+                line(ix)->setText(QString::number(p[0], 'g', 12));
+                line(iy)->setText(QString::number(p[1], 'g', 12));
+                line(iz)->setText(QString::number(p[2], 'g', 12));
+            };
+            setPoint(corners.first, x0, y0, z0);
+            setPoint(corners.second, x1, y1, z1);
+            queuePreview();
+        });
+        session->sphere->_SetPointMoveCallBack("ExtractCellsByRegion", [=]() {
+            if (!safeDialog || session->closed) return;
+            const auto& center = session->sphere->GetStartPoint();
+            const double r = (session->sphere->GetEndPoint() - center).length();
+            line(x0)->setText(QString::number(center[0], 'g', 12));
+            line(y0)->setText(QString::number(center[1], 'g', 12));
+            line(z0)->setText(QString::number(center[2], 'g', 12));
+            line(radius)->setText(QString::number(r, 'g', 12));
+            queuePreview();
+        });
+        auto makeFilter = [=](bool reportError) -> iGame::ExtractCellsByRegionFilter::Pointer {
             bool ok[9]{};
             const int mode = dialog->getComboIndex(shape, ok[0]);
             const double a = dialog->getDouble(x0, ok[1]), b = dialog->getDouble(y0, ok[2]),
@@ -3948,18 +4062,90 @@ void igQtMainWindow::initAllFilters() {
             const bool all = dialog->getChecked(strict, ok[8]);
             if (!ok[0] || !ok[1] || !ok[2] || !ok[3] || !ok[8] ||
                 (mode == 0 && (!ok[4] || !ok[5] || !ok[6] || d < a || e < b || f < c)) ||
-                (mode == 1 && (!ok[7] || r <= 0))) {
-                showDarkFramelessMessage(title, QStringLiteral("请填写有效的区域参数。")); return;
+                (mode == 1 && (!ok[7] || r <= 0)) || mode < 0 || mode > 1) {
+                if (reportError) showDarkFramelessMessage(title, QStringLiteral("请填写有效的区域参数。"));
+                return nullptr;
             }
             auto filter = ExtractCellsByRegionFilter::New();
             filter->SetInput(input);
             if (mode == 0) filter->SetBox(Vector3d(a, b, c), Vector3d(d, e, f));
             else filter->SetSphere(Vector3d(a, b, c), r);
             filter->SetRequireAllPoints(all);
-            if (!filter->Execute()) { showDarkFramelessMessage(title, QStringLiteral("区域提取失败。")); return; }
-            refreshFilterResult(input, filter->GetOutput(), title);
-            dialog->close();
+            return filter;
+        };
+        dialog->setPreviewFunctor([=]() {
+            auto filter = makeFilter(false);
+            if (!filter || !filter->Preview()) {
+                if (selection) selection->Reset();
+                countLabel->setText(QStringLiteral("区域参数无效"));
+                rendererWidget->update();
+                return;
+            }
+            const auto& chosen = filter->GetSelectedCellIds();
+            if (selection) {
+                const std::vector<igIndex> ids(chosen.begin(), chosen.end());
+                selection->Reset();
+                selection->SelectionCallBackEvent(IG_CELL, ids, iGame::Selection::Operate::Add);
+            }
+            countLabel->setText(QStringLiteral("预览：%1 个单元").arg(chosen.size()));
+            rendererWidget->update();
         });
+        dialog->setApplyFunctor([=, this]() {
+            auto filter = makeFilter(true);
+            if (!filter) return;
+            if (!filter->Execute()) { showDarkFramelessMessage(title, QStringLiteral("区域提取失败。")); return; }
+            auto output = filter->GetOutput();
+            output->SetName(input->GetName() + "_ExtractCellsByRegion");
+            auto* resultItem = session->output ? modelTreeWidget->getItemFromObject(session->output) : nullptr;
+            if (resultItem) {
+                auto* resultModel = resultItem->getModel();
+                resultModel->SetDataObject(output);
+                scene->SetCurrentModel(resultModel);
+                modelTreeWidget->updateAllAttriubute(output);
+                modelTreeWidget->setCurrentItem(resultItem);
+                modelTreeWidget->updateCurrentModelInfo();
+                scene->Update();
+                rendererWidget->update();
+            } else {
+                modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+            }
+            session->output = output;
+        });
+        dialog->setCloseFunctor([=]() {
+            session->closed = true;
+            session->box->RemovePointMoveCallBack("ExtractCellsByRegion");
+            session->sphere->RemovePointMoveCallBack("ExtractCellsByRegion");
+            session->box->ClearDraw();
+            session->sphere->SetShow(false);
+            interactor->RemoveSepcialInteractor("ExtractCellsByRegionSphere");
+            interactor->RemoveSepcialInteractor("SelectBox");
+            if (previousBox) interactor->_SetSpecialInteractor("SelectBox", previousBox);
+            iGame::SelectionParameter::Instance().SetHaveBox(previousHaveBox);
+            iGame::SelectionParameter::Instance().SetInSelection(previousInSelection);
+            if (auto oldBox = DynamicCast<iGame::BoxStyle>(previousBox)) {
+                if (oldBox->GetBox()) oldBox->ToDraw();
+            }
+            if (selection) {
+                selection->Reset();
+                selection->SelectionCallBackEvent(IG_CELL, selectionBefore, iGame::Selection::Operate::Add);
+                selection->SelectionCallBackEvent(IG_POINT, pointsBefore, iGame::Selection::Operate::Add);
+            }
+            rendererWidget->update();
+        });
+        iGame::SelectionParameter::Instance().SetInSelection(false);
+        for (int id : {x0, y0, z0, x1, y1, z1, radius}) {
+            if (auto* edit = line(id)) connect(edit, &QLineEdit::editingFinished, dialog, [=]() {
+                updateWidget();
+                queuePreview();
+            });
+        }
+        if (auto* combo = qobject_cast<QComboBox*>(dialog->getWidget(shape)))
+            connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged), dialog,
+                    [=](int) { switchShape(); });
+        if (auto* check = qobject_cast<QCheckBox*>(dialog->getWidget(strict)))
+            connect(check, &QCheckBox::toggled, dialog, [=](bool) { queuePreview(); });
+        switchShape();
+        dialog->show();
     });
 
     bindDevelopmentAction("extract_cells_by_type", [=, this]() {
