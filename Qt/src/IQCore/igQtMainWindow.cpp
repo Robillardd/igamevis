@@ -768,7 +768,11 @@ void igQtMainWindow::initCustomTitleBar() {
     m_topMenuLayout = topLayout;
     if (ui->menuBar) {
         ui->menuBar->setParent(topRow);
-        ui->menuBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        // A reparented QMenuBar can keep the designer's full-window size hint.
+        // Reserve just enough title-bar space for the four top-level menus;
+        // otherwise Qt compresses every entry into the barely visible » menu.
+        ui->menuBar->setFixedWidth(360);
+        ui->menuBar->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         ui->menuBar->setFixedHeight(28);
         ui->menuBar->show();
         m_topMenuLayout->insertWidget(1, ui->menuBar, 0, Qt::AlignVCenter);
