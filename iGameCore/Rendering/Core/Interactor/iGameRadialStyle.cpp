@@ -2,6 +2,8 @@
 #include "iGameInteractor.h"
 #include "iGameLine.h"
 #include "iGameScene.h"
+#include <cmath>
+#include <limits>
 using namespace std;
 IGAME_NAMESPACE_BEGIN
 
@@ -32,7 +34,7 @@ void RadialStyle::DrawRadial() {
     if (!m_Show) return;
     auto painter = m_Scene->GetPainter3D();
 
-    painter->SetPen(7);
+    painter->SetPen(m_HoveredPoint == &m_StartPoint ? 13 : 9);
     painter->SetPen(Color::Blue);
     int startPointHandle = painter->DrawPoint(m_StartPoint);
     m_DrawHandles.push_back(startPointHandle);
@@ -42,7 +44,7 @@ void RadialStyle::DrawRadial() {
     int lineHandle = painter->DrawLine(m_StartPoint, m_EndPoint);
     m_DrawHandles.push_back(lineHandle);
 
-    painter->SetPen(7);
+    painter->SetPen(m_HoveredPoint == &m_EndPoint ? 13 : 9);
     painter->SetPen(Color::Red);
     int endPointHandle = painter->DrawPoint(m_EndPoint);
     m_DrawHandles.push_back(endPointHandle);
@@ -72,28 +74,26 @@ void RadialStyle::MousePressEvent(IEvent event) {
     m_SelectedPoint = nullptr;
     if (!m_Show) return;
 
-    if (event.button != MouseButton::MiddleButton) return;
+    if (event.button != MouseButton::MiddleButton &&
+        !(m_AllowLeftHandleDrag && event.button == MouseButton::LeftButton)) return;
 
     m_MVP = m_Interactor->GetMVP();
     m_InvertedMVP = m_MVP.invert();
 
     auto& pos = event.pos;
 
-    igm::vec3 nearPoint = GetNearWorldCoord(pos, m_InvertedMVP);
-    igm::vec3 farPoint = GetFarWorldCoord(pos, m_InvertedMVP);
-    igm::vec3 rayDir = (farPoint - nearPoint).normalized();
-
-    Point lineStartPoint = Point(nearPoint.x, nearPoint.y, nearPoint.z);
-    Point lineDir = Point(rayDir.x, rayDir.y, rayDir.z);
-
-    float tolerance = m_MaxDis;
-
-    float distToStart =
-            Line::ComputePointToLineDis(lineStartPoint, lineDir, m_StartPoint);
-    bool startSelected = (distToStart <= tolerance);
-    float distToEnd =
-            Line::ComputePointToLineDis(lineStartPoint, lineDir, m_EndPoint);
-    bool endSelected = (distToEnd <= tolerance);
+    const auto screenDistance = [this, &pos](const Point& point) {
+        const igm::vec4 clip = m_MVP * igm::vec4(point[0], point[1], point[2], 1.f);
+        if (clip.w <= 0.f) return std::numeric_limits<float>::max();
+        const float x = (clip.x / clip.w + 1.f) * m_Interactor->GetWidth() * 0.5f;
+        const float y = (1.f - clip.y / clip.w) * m_Interactor->GetHeight() * 0.5f;
+        const float dx = x - pos.x, dy = y - pos.y;
+        return std::sqrt(dx * dx + dy * dy);
+    };
+    const float distToStart = screenDistance(m_StartPoint);
+    const float distToEnd = screenDistance(m_EndPoint);
+    const bool startSelected = distToStart <= 12.f;
+    const bool endSelected = distToEnd <= 12.f;
 
     if (startSelected && endSelected) {
         m_SelectedPoint =
@@ -113,10 +113,28 @@ void RadialStyle::MousePressEvent(IEvent event) {
 }
 
 void RadialStyle::MouseMoveEvent(IEvent event) {
-
-    if (m_SelectedPoint == nullptr) return;
     if (!m_Show) return;
-    if (m_MouseMode != MouseButton::MiddleButton) return;
+    if (m_SelectedPoint == nullptr) {
+        m_MVP = m_Interactor->GetMVP();
+        const auto distance = [this, &event](const Point& point) {
+            const igm::vec4 clip = m_MVP * igm::vec4(point[0], point[1], point[2], 1.f);
+            if (clip.w <= 0.f) return std::numeric_limits<float>::max();
+            const float x = (clip.x / clip.w + 1.f) * m_Interactor->GetWidth() * 0.5f;
+            const float y = (1.f - clip.y / clip.w) * m_Interactor->GetHeight() * 0.5f;
+            const float dx = x - event.pos.x, dy = y - event.pos.y;
+            return std::sqrt(dx * dx + dy * dy);
+        };
+        const float a = distance(m_StartPoint), b = distance(m_EndPoint);
+        Point* hovered = nullptr;
+        if (a <= 12.f || b <= 12.f) hovered = a <= b ? &m_StartPoint : &m_EndPoint;
+        if (hovered != m_HoveredPoint) {
+            m_HoveredPoint = hovered;
+            ClearDrawRadial();
+            DrawRadial();
+        }
+        return;
+    }
+    if (!IsInteractionActive()) return;
 
     igm::vec2 pos = event.pos;
 
@@ -137,10 +155,19 @@ void RadialStyle::MouseMoveEvent(IEvent event) {
     CallBack();
 }
 
+void RadialStyle::MouseReleaseEvent(IEvent event) {
+    BasicStyle::MouseReleaseEvent(event);
+    m_SelectedPoint = nullptr;
+}
+
 void RadialStyle::SetShow(bool show) {
     if (m_Show == show) return;
     m_Show = show;
-    if (m_Show == false) ClearDrawRadial();
+    if (m_Show == false) {
+        ClearDrawRadial();
+        m_HoveredPoint = nullptr;
+        m_SelectedPoint = nullptr;
+    }
     else
         DrawRadial();
 }

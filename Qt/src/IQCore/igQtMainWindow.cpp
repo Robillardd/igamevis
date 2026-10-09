@@ -3941,7 +3941,11 @@ void igQtMainWindow::initAllFilters() {
         auto scene = rendererWidget->GetScene();
         auto interactor = scene ? scene->GetInteractor() : nullptr;
         if (!interactor) return;
-        auto selection = mesh->GetSelection();
+        // The model binds Selection to its painters. Taking it from the mesh
+        // first can create an unbound Selection, so preview IDs never draw.
+        auto inputModel = scene->GetCurrentModel();
+        auto selection = inputModel->GetSelection();
+        selection->SetModel(inputModel);
         std::vector<igIndex> selectionBefore;
         std::vector<igIndex> pointsBefore;
         if (selection) {
@@ -3983,10 +3987,12 @@ void igQtMainWindow::initAllFilters() {
         session->box = iGame::BoxStyle::New();
         session->box->Initialize(interactor);
         session->box->SetAllowRotation(false);
+        session->box->SetAllowLeftHandleDrag(true);
         session->sphere = iGame::RadialStyle::New();
         session->sphere->Initialize(interactor);
         session->sphere->SetMoveEndWithStart(true);
         session->sphere->SetShowSphere(true);
+        session->sphere->SetAllowLeftHandleDrag(true);
         QPointer<igQtFilterDialogDockWidget> safeDialog(dialog);
 
         auto line = [dialog](int id) { return qobject_cast<QLineEdit*>(dialog->getWidget(id)); };
@@ -4098,6 +4104,12 @@ void igQtMainWindow::initAllFilters() {
             auto filter = makeFilter(true);
             if (!filter) return;
             if (!filter->Execute()) { showDarkFramelessMessage(title, QStringLiteral("区域提取失败。")); return; }
+            if (filter->GetSelectedCellIds().empty()) {
+                countLabel->setText(QStringLiteral("当前区域没有单元；未更新结果。"));
+                if (selection) selection->Reset();
+                rendererWidget->update();
+                return;
+            }
             auto output = filter->GetOutput();
             output->SetName(input->GetName() + "_ExtractCellsByRegion");
             auto* resultItem = session->output ? modelTreeWidget->getItemFromObject(session->output) : nullptr;
@@ -4150,6 +4162,8 @@ void igQtMainWindow::initAllFilters() {
             connect(check, &QCheckBox::toggled, dialog, [=](bool) { queuePreview(); });
         switchShape();
         dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
     });
 
     bindDevelopmentAction("extract_cells_by_type", [=, this]() {
